@@ -2,7 +2,9 @@ whole.deck <- c(2,2,2,2,3,3,3,3,4,4,4,4,5,5,5,5,6,6,6,6,7,7,7,7,8,8,8,8,9,9,9,9,
 cards.left <- whole.deck
 
 risk <- 0.5
+risk.list <- c()
 trust <- 0.5
+trust.list <- c()
 hand <- 0
 total.score <- 0
 stop <- FALSE
@@ -56,6 +58,7 @@ play.round <- function() {
   hand <<- 0
   cards.left <<- whole.deck
   stop <<- FALSE
+  risk.list <<- c(risk.list, risk)
 }
 
 #play a bunch of rounds and return final score, fails, and avg stop value from stop list
@@ -74,3 +77,4 @@ run.bunch <- function(n){
 }
 
 run.bunch(100)
+plot(1:100, risk.list)
