@@ -160,6 +160,7 @@ experience.levels <- c()
 risks <- c()
 trusts <- c()
 total.scores <- c()
+agrees <- c()
 
 # Play a bunch of rounds and return risk, fails, final score, and avg stop value from stop list
 run.bunch <- function(n){
@@ -193,6 +194,7 @@ run.bunch <- function(n){
   risks <<- c(risks, risk)
   trusts <<- c(trusts, trust)
   total.scores <<- c(total.scores, total.score)
+  agrees <<- c(agrees, agree.count)
 }
 
 # Run 300 rounds with 1 person
@@ -201,6 +203,7 @@ experience.levels <<- c()
 risks <<- c()
 trusts <<- c()
 total.scores <<- c()
+agrees <<- c()
 scores.over.time <<- data.frame(risk.list, trust.list)
 # See that person's risk factor over the 300 rounds with trust as a color
 ggplot(scores.over.time, aes(x=1:300, y=risk.list, color=trust.list))+
@@ -213,23 +216,69 @@ ggplot(scores.over.time, aes(x=1:300, y=trust.list, color=risk.list))+
 # generate data for a bunch of participants after 100 trials each (final risk, final trust, final score, category)
 replicate(100, {run.bunch(50)})
 # Generated data
-gen.data <<- data.frame(experience.levels, risks, trusts, total.scores)
+gen.data <<- data.frame(experience.levels, risks, trusts, total.scores, agrees)
+
+experience.levels <<- c()
+risks <<- c()
+trusts <<- c()
+total.scores <<- c()
+agrees <<- c()
+replicate(100, {run.bunch(50)})
+# Generated data
+gen.data.two <<- data.frame(experience.levels, risks, trusts, total.scores, agrees)
+
+# Risks vs Trusts
+ggplot(gen.data, aes(x=risks, y=trusts, color=experience.levels))+
+  geom_point()
+
+ggplot(gen.data, aes(x=risks, y=total.scores, color=experience.levels))+
+  geom_point()
+
+ggplot(gen.data, aes(x=agrees, y=trusts, color=experience.levels))+
+  geom_point()
 
 # see whether the model can predict which category the data comes from
 
-rmse.from.models <- function(params) {
-  risk <<- params[1]
-  trust <<- params[2]
-  new.data <- replicate(1000, {run.bunch(50)})
+gcm.categorize <- function(training.data, x.stim, y.stim, target.category, c, a){
+  td <- training.data
+  td$distance <- mapply(function(x,y){
+    if(is.na((sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 )))){
+      return(0)
+    }
+    if(!is.na((sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 )))){
+      return(sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 ))
+    }
+  }, td$risks, td$trusts)
+  if(is.na(td$distance)){
+    td$distance <- 0
+  }
+  td$similarity <- exp( -c * td$distance)
+  pr.correct <- sum(subset(td, experience.levels==target.category)$similarity) / sum(td$similarity)
+  return(pr.correct)
+}
+
+gcm.rmse <- function(training, test, sensitivity, attention){
+  print(test$experience.levels)
+  test$predicted <- mapply(function(x, y, category){
+    gcm.categorize(training, x, y, category, sensitivity, attention)
+  }, test$risks, test$trusts, test$experience.levels)
   
-  rmse.squares <- (new.data-gen.data)^2
-  rmse <- sqrt(mean(rmse.squares))
+  test$squares <- mapply(function(x, y) {
+    ((x-y)^2)
+  }, test$experience.levels, test$predicted)
+  
+  rmse <- sqrt(mean(test$squares))
   return(rmse)
 }
 
-pars <- c(0.5,0.5)
-optim.result <- optim(pars, rmse.from.models, method="Nelder-Mead")
+gcm.model.error <- function(parameters){
+  return (gcm.rmse(gen.data, gen.data.two, parameters[1], parameters[2]))
+}
 
-deoptim.result <- DEoptim(rmse.from.models, c(0,0), c(1,1))
-deoptim.result$par
-deoptim.result$val
+pars <- c(1, 0.5)
+gcm.fit <- optim(pars, gcm.model.error, method="Nelder-Mead")
+gcm.fit$par
+gcm.fit$value
+
+optim.result <- DEoptim(linear.model.error, c(0,0), c(1,1))
+optim.result$optim$bestmem
