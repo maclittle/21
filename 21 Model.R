@@ -163,42 +163,35 @@ total.scores <- c()
 agrees <- c()
 
 # Play a bunch of rounds and return risk, fails, final score, and avg stop value from stop list
-run.bunch <- function(n){
+run.bunch <- function(n, high.start.trust, low.start.trust, high.trust.boost, low.trust.boost){
+  agree.count <<- 0
   # Determines whether participant is in high or low exerience condition
   experience.level <<- rbinom(1, 1, 0.5)
   # If they think the second agent has high experience, they trust the successes more and start with higher trust
   if(experience.level==1){
-    experience.trust <<- 0.06
-    trust <<- 0.3
+    experience.trust <<- high.trust.boost
+    trust <<- high.start.trust
   }
   # If they think the second agent has low experience, they trust the successes less and start with lower trust
   if(experience.level==0){
-    experience.trust <<- 0.03
-    trust <<- 0.1
+    experience.trust <<- low.trust.boost
+    trust <<- low.start.trust
   }
   for (i in 1:n){
     play.round()
   }
-  #print("experience level: (1 is high, 0 is low)")
-  #print(experience.level)
-  #print("risk:")
-  #print(risk)
-  #print("number of fails: ")
-  #print(fails)
-  #print("total score:")
-  #print(total.score)
-  #print("average stopping point of success:")
-  #print(mean(stop.list))
+
   
   experience.levels <<- c(experience.levels, experience.level)
   risks <<- c(risks, risk)
   trusts <<- c(trusts, trust)
   total.scores <<- c(total.scores, total.score)
   agrees <<- c(agrees, agree.count)
+  return(agree.count)
 }
 
 # Run 300 rounds with 1 person
-run.bunch(300)
+run.bunch(300, 0.3, 0.1, 0.06, 0.03)
 experience.levels <<- c()
 risks <<- c()
 trusts <<- c()
@@ -214,20 +207,11 @@ ggplot(scores.over.time, aes(x=1:300, y=trust.list, color=risk.list))+
 
 
 # generate data for a bunch of participants after 100 trials each (final risk, final trust, final score, category)
-replicate(100, {run.bunch(50)})
+replicate(100, {run.bunch(100, 0.3, 0.1, 0.06, 0.03)})
 # Generated data
 gen.data <<- data.frame(experience.levels, risks, trusts, total.scores, agrees)
 
-experience.levels <<- c()
-risks <<- c()
-trusts <<- c()
-total.scores <<- c()
-agrees <<- c()
-replicate(100, {run.bunch(50)})
-# Generated data
-gen.data.two <<- data.frame(experience.levels, risks, trusts, total.scores, agrees)
-
-# Risks vs Trusts
+# Risks vs Trusts for multiple players
 ggplot(gen.data, aes(x=risks, y=trusts, color=experience.levels))+
   geom_point()
 
@@ -237,48 +221,36 @@ ggplot(gen.data, aes(x=risks, y=total.scores, color=experience.levels))+
 ggplot(gen.data, aes(x=agrees, y=trusts, color=experience.levels))+
   geom_point()
 
-# see whether the model can predict which category the data comes from
 
-gcm.categorize <- function(training.data, x.stim, y.stim, target.category, c, a){
-  td <- training.data
-  td$distance <- mapply(function(x,y){
-    if(is.na((sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 )))){
-      return(0)
-    }
-    if(!is.na((sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 )))){
-      return(sqrt( a*(x-x.stim)^2 + (1-a)*(y-y.stim)^2 ))
-    }
-  }, td$risks, td$trusts)
-  if(is.na(td$distance)){
-    td$distance <- 0
-  }
-  td$similarity <- exp( -c * td$distance)
-  pr.correct <- sum(subset(td, experience.levels==target.category)$similarity) / sum(td$similarity)
-  return(pr.correct)
-}
+# Model Recovery
+# pick values for each of the four parameters
+known.high.trust.start <- 0.3
+known.low.trust.start <- 0.1
+known.high.trust.boost <- 0.06
+known.low.trust.boost <- 0.03
 
-gcm.rmse <- function(training, test, sensitivity, attention){
-  print(test$experience.levels)
-  test$predicted <- mapply(function(x, y, category){
-    gcm.categorize(training, x, y, category, sensitivity, attention)
-  }, test$risks, test$trusts, test$experience.levels)
+# now generate 100 agree counts from these parameters.
+agree.data <- replicate(300, {run.bunch(50, known.high.trust.start, known.low.trust.start, known.high.trust.boost, known.low.trust.boost)})
+
+rmse.from.models <- function(params) {
+  new.high.start <- params[1]
+  new.low.start <- params[2]
+  new.high.boost <- params[3]
+  new.low.boost <- params[4]
+  new.data <- replicate(300, {run.bunch(50, new.high.start, new.low.start, new.high.boost, new.low.boost)})
   
-  test$squares <- mapply(function(x, y) {
-    ((x-y)^2)
-  }, test$experience.levels, test$predicted)
-  
-  rmse <- sqrt(mean(test$squares))
+  rmse.squares <- (new.data-agree.data)^2
+  rmse <- sqrt(mean(rmse.squares))
   return(rmse)
 }
 
-gcm.model.error <- function(parameters){
-  return (gcm.rmse(gen.data, gen.data.two, parameters[1], parameters[2]))
-}
+deoptim.result <- DEoptim(rmse.from.models, c(0,0,0,0), c(1,1,1,1))
+deoptim.result$par
+#Iteration: 12 bestvalit: 4.266146 bestmemit:    0.047720    0.148584    0.038260    0.003385
+deoptim.result$val
 
-pars <- c(1, 0.5)
-gcm.fit <- optim(pars, gcm.model.error, method="Nelder-Mead")
-gcm.fit$par
-gcm.fit$value
-
-optim.result <- DEoptim(linear.model.error, c(0,0), c(1,1))
-optim.result$optim$bestmem
+pars <- c(0.2, 0.2, 0.05, 0.05)
+optim.result <- optim(pars, gcm.model.error, method="Nelder-Mead")
+optim.result$par
+# 0.83697609  0.66449769 -0.75387064 -0.07465715
+optim.result$val
